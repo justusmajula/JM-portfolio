@@ -465,19 +465,64 @@
                 display: flex !important;
             }
             /* Cards & Sections */
-            #section-resume > div,
+            #section-resume > div:not(.grid),
+            #section-resume .print-avoid-break > div,
+            #section-resume .card-glow,
             #section-projects .project-card,
-            body.light-mode #section-resume > div,
+            body.light-mode #section-resume > div:not(.grid),
+            body.light-mode #section-resume .print-avoid-break > div,
+            body.light-mode #section-resume .card-glow,
             body.light-mode #section-projects .project-card {
-                background: #ffffff !important;
+                background-color: #ffffff !important;
                 background-image: none !important;
                 border: 1.5px solid #cbd5e1 !important;
                 border-top: 4px solid #0284c7 !important;
                 border-radius: 12px !important;
                 padding: 14px 18px !important;
                 margin-bottom: 14px !important;
+                color: #0f172a !important;
                 box-shadow: none !important;
                 transform: none !important;
+            }
+            /* Keep Education & Languages grid container transparent in print */
+            #section-resume > div.grid,
+            body.light-mode #section-resume > div.grid {
+                background: transparent !important;
+                background-image: none !important;
+                border: none !important;
+                padding: 0 !important;
+                margin-bottom: 0 !important;
+                box-shadow: none !important;
+            }
+            /* Ensure Education & Languages text, borders, and progress bars are light & legible */
+            #section-resume .print-avoid-break h3,
+            #section-resume .print-avoid-break h4,
+            body.light-mode #section-resume .print-avoid-break h3,
+            body.light-mode #section-resume .print-avoid-break h4 {
+                color: #0f172a !important;
+            }
+            #section-resume .print-avoid-break p,
+            #section-resume .print-avoid-break span,
+            body.light-mode #section-resume .print-avoid-break p,
+            body.light-mode #section-resume .print-avoid-break span {
+                color: #334155 !important;
+            }
+            #section-resume .print-avoid-break .text-cyan-400,
+            body.light-mode #section-resume .print-avoid-break .text-cyan-400 {
+                color: #0284c7 !important;
+            }
+            #section-resume .print-avoid-break .border-slate-800,
+            body.light-mode #section-resume .print-avoid-break .border-slate-800 {
+                border-color: #cbd5e1 !important;
+            }
+            #section-resume .print-avoid-break .bg-slate-950,
+            body.light-mode #section-resume .print-avoid-break .bg-slate-950 {
+                background-color: #e2e8f0 !important;
+                border-color: #94a3b8 !important;
+            }
+            #section-resume .print-avoid-break .bg-gradient-to-r.from-cyan-500.to-blue-500 {
+                background-image: none !important;
+                background-color: #0284c7 !important;
             }
             .project-photo-thumb {
                 height: 110px !important;
