@@ -1365,13 +1365,26 @@
     <!-- Tab, Theme & Project Media Upload Script -->
     <script>
         // =========================================================================
-        // CLOUDINARY-ONLY STORAGE & ADMIN CONFIGURATION
-        // Anyone who opens your portfolio link automatically fetches your uploaded
-        // photos & videos by project tag from Cloudinary, sorted naturally by
-        // filename/public_id (e.g., 01-, 02-, 03-).
+        // CLOUDINARY + FIREBASE FIRESTORE SYNC & ADMIN CONFIGURATION
+        // - Uploads files to Cloudinary (koy0d8kg / JM unsigned).
+        // - Saves active media records in Firestore when FIREBASE_CONFIG is set,
+        //   so deleting in Edit Mode removes items permanently for all visitors.
+        // - Falls back gracefully to local browser storage when unconfigured.
         // =========================================================================
         const CLOUDINARY_CLOUD_NAME = 'koy0d8kg';
         const CLOUDINARY_UPLOAD_PRESET = 'JM unsigned';
+
+        // Replace placeholder values below with your Firebase Web App config
+        // and enable Firestore in test/open rules for portfolio media sync.
+        const FIREBASE_CONFIG = {
+            apiKey: 'YOUR_FIREBASE_API_KEY',
+            authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',
+            projectId: 'YOUR_FIREBASE_PROJECT_ID',
+            storageBucket: 'YOUR_PROJECT_ID.appspot.com',
+            messagingSenderId: 'YOUR_SENDER_ID',
+            appId: 'YOUR_APP_ID'
+        };
+        const FIRESTORE_MEDIA_COLLECTION = 'jm_portfolio_media';
 
         // Change this passcode before deploying publicly
         const ADMIN_PASSCODE = 'JM2026';
@@ -1398,6 +1411,19 @@
                 CLOUDINARY_CLOUD_NAME !== 'YOUR_CLOUD_NAME' &&
                 CLOUDINARY_UPLOAD_PRESET &&
                 CLOUDINARY_UPLOAD_PRESET !== 'YOUR_UNSIGNED_PRESET'
+            );
+        }
+
+        /**
+         * Returns true once real Firebase Firestore credentials are configured.
+         */
+        function isFirestoreConfigured() {
+            return Boolean(
+                FIREBASE_CONFIG &&
+                FIREBASE_CONFIG.projectId &&
+                FIREBASE_CONFIG.projectId !== 'YOUR_FIREBASE_PROJECT_ID' &&
+                FIREBASE_CONFIG.apiKey &&
+                FIREBASE_CONFIG.apiKey !== 'YOUR_FIREBASE_API_KEY'
             );
         }
 
@@ -1441,12 +1467,15 @@
             const text = document.getElementById('cloud-status-text');
             if (!dot || !text) return;
 
-            if (isCloudConfigured()) {
+            if (isCloudConfigured() && isFirestoreConfigured()) {
                 dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0';
-                text.textContent = 'Cloudinary Connected — Photos & videos sync across all devices.';
+                text.textContent = 'Cloudinary + Firestore Synced — Uploads & deletes apply across all devices.';
+            } else if (isCloudConfigured()) {
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-cyan-400 shrink-0';
+                text.textContent = 'Cloudinary Connected (Local Delete Mode) — Add FIREBASE_CONFIG for global deletes.';
             } else {
                 dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0';
-                text.textContent = 'Local Preview Mode — Add your Cloudinary Cloud Name & Upload Preset in index.html for public sharing.';
+                text.textContent = 'Local Preview Mode — Add Cloudinary & Firebase keys in index.html for public sync.';
             }
         }
 
@@ -1602,6 +1631,101 @@
             return base.replace(/[_-]+/g, ' ');
         }
 
+        function encodeFirestoreDocId(mediaId) {
+            return encodeURIComponent(String(mediaId || '').replace(/[^a-zA-Z0-9_-]/g, '_'));
+        }
+
+        function toFirestoreFields(record) {
+            return {
+                fields: {
+                    id: { stringValue: String(record.id || '') },
+                    projectId: { stringValue: String(record.projectId || '') },
+                    sortKey: { stringValue: String(record.sortKey || record.name || '') },
+                    type: { stringValue: record.type === 'video' ? 'video' : 'image' },
+                    name: { stringValue: String(record.name || 'Site Media') },
+                    src: { stringValue: String(record.src || '') },
+                    poster: { stringValue: String(record.poster || '') },
+                    updatedAt: { integerValue: String(Date.now()) }
+                }
+            };
+        }
+
+        function fromFirestoreDoc(docObj) {
+            const fields = docObj && docObj.fields ? docObj.fields : {};
+            const id = fields.id && fields.id.stringValue ? fields.id.stringValue : '';
+            const projectId = fields.projectId && fields.projectId.stringValue ? fields.projectId.stringValue : '';
+            const src = fields.src && fields.src.stringValue ? fields.src.stringValue : '';
+            if (!id || !projectId || !src) return null;
+            return {
+                id,
+                projectId,
+                sortKey: fields.sortKey && fields.sortKey.stringValue ? fields.sortKey.stringValue : id,
+                type: fields.type && fields.type.stringValue === 'video' ? 'video' : 'image',
+                name: fields.name && fields.name.stringValue ? fields.name.stringValue : formatResourceDisplayName(id),
+                src,
+                poster: fields.poster && fields.poster.stringValue ? fields.poster.stringValue : ''
+            };
+        }
+
+        function getFirestoreCollectionUrl(docId = '') {
+            const base = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(FIREBASE_CONFIG.projectId)}/databases/(default)/documents/${encodeURIComponent(FIRESTORE_MEDIA_COLLECTION)}`;
+            const query = `?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`;
+            return docId ? `${base}/${encodeFirestoreDocId(docId)}${query}` : `${base}${query}`;
+        }
+
+        async function saveMediaRecordToFirestore(projectId, item) {
+            if (!isFirestoreConfigured() || !item || !item.id) return false;
+            const url = getFirestoreCollectionUrl(item.id);
+            const response = await fetch(url, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(toFirestoreFields({ ...item, projectId }))
+            });
+            if (!response.ok) {
+                throw new Error(`FIRESTORE_WRITE_${response.status}`);
+            }
+            return true;
+        }
+
+        async function deleteMediaRecordFromFirestore(mediaId) {
+            if (!isFirestoreConfigured() || !mediaId) return false;
+            const url = getFirestoreCollectionUrl(mediaId);
+            const response = await fetch(url, { method: 'DELETE' });
+            if (!response.ok && response.status !== 404) {
+                throw new Error(`FIRESTORE_DELETE_${response.status}`);
+            }
+            return true;
+        }
+
+        async function fetchAllFirestoreMedia() {
+            const grouped = {};
+            PROJECT_IDS.forEach(pid => { grouped[pid] = []; });
+
+            let pageToken = '';
+            do {
+                const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+                const url = `${getFirestoreCollectionUrl()}&pageSize=200${tokenParam}`;
+                const response = await fetch(url, { method: 'GET' });
+                if (!response.ok) {
+                    throw new Error(`FIRESTORE_READ_${response.status}`);
+                }
+                const data = await response.json();
+                const docs = Array.isArray(data.documents) ? data.documents : [];
+                docs.forEach(docObj => {
+                    const parsed = fromFirestoreDoc(docObj);
+                    if (parsed && Object.prototype.hasOwnProperty.call(grouped, parsed.projectId)) {
+                        grouped[parsed.projectId].push(parsed);
+                    }
+                });
+                pageToken = data.nextPageToken || '';
+            } while (pageToken);
+
+            PROJECT_IDS.forEach(pid => {
+                grouped[pid] = sortProjectMedia(grouped[pid]);
+            });
+            return grouped;
+        }
+
         async function fetchCloudinaryResourceList(projectId, resourceType = 'image') {
             const listUrl = `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/${resourceType}/list/${encodeURIComponent(projectId)}.json?t=${Date.now()}`;
             const response = await fetch(listUrl, { method: 'GET' });
@@ -1650,6 +1774,19 @@
         }
 
         async function loadStoredPhotos() {
+            if (isFirestoreConfigured()) {
+                isLoadingPhotos = true;
+                renderAllProjectPhotos();
+                try {
+                    projectPhotos = await fetchAllFirestoreMedia();
+                    return;
+                } catch {
+                    showToast('Could not sync with Firestore. Falling back to Cloudinary/local cache.');
+                } finally {
+                    isLoadingPhotos = false;
+                }
+            }
+
             if (!isCloudConfigured()) {
                 loadLocalFallbackPhotos();
                 return;
@@ -1779,6 +1916,7 @@
             }
 
             const cloudReady = isCloudConfigured();
+            const firestoreReady = isFirestoreConfigured();
             let uploadedCount = 0;
             setCardUploadingState(projectId, true);
 
@@ -1792,6 +1930,7 @@
                     }
 
                     try {
+                        let newItem = null;
                         if (isVideo) {
                             if (cloudReady) {
                                 const uploaded = await uploadBlobToCloudinary(file, file.name, projectId, 'video');
@@ -1800,26 +1939,24 @@
                                     hiddenCloudPhotoIds.delete(newId);
                                     saveHiddenCloudPhotoIds();
                                 }
-                                projectPhotos[projectId].push({
+                                newItem = {
                                     id: newId,
                                     sortKey: uploaded.public_id || file.name,
                                     type: 'video',
                                     name: file.name,
                                     src: uploaded.secure_url || buildCloudinaryMediaUrl(uploaded, 'video'),
                                     poster: uploaded.public_id ? buildCloudinaryVideoPosterUrl(uploaded) : ''
-                                });
-                                uploadedCount += 1;
+                                };
                             } else {
                                 const videoDataUrl = await readFileAsDataUrl(file);
-                                projectPhotos[projectId].push({
+                                newItem = {
                                     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                                     sortKey: file.name,
                                     type: 'video',
                                     name: file.name,
                                     src: videoDataUrl,
                                     poster: ''
-                                });
-                                uploadedCount += 1;
+                                };
                             }
                         } else {
                             const compressed = await compressImageFile(file);
@@ -1831,24 +1968,30 @@
                                     hiddenCloudPhotoIds.delete(newId);
                                     saveHiddenCloudPhotoIds();
                                 }
-                                projectPhotos[projectId].push({
+                                newItem = {
                                     id: newId,
                                     sortKey: uploaded.public_id || compressed.name,
                                     type: 'image',
                                     name: compressed.name,
                                     src: uploaded.secure_url || buildCloudinaryMediaUrl(uploaded, 'image')
-                                });
-                                uploadedCount += 1;
+                                };
                             } else {
-                                projectPhotos[projectId].push({
+                                newItem = {
                                     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                                     sortKey: compressed.name,
                                     type: 'image',
                                     name: compressed.name,
                                     src: compressed.dataUrl
-                                });
-                                uploadedCount += 1;
+                                };
                             }
+                        }
+
+                        if (newItem) {
+                            projectPhotos[projectId].push(newItem);
+                            if (firestoreReady) {
+                                await saveMediaRecordToFirestore(projectId, newItem);
+                            }
+                            uploadedCount += 1;
                         }
                     } catch {
                         showToast(`Could not upload ${file.name}.`);
@@ -1857,17 +2000,19 @@
 
                 projectPhotos[projectId] = sortProjectMedia(projectPhotos[projectId]);
 
-                if (!cloudReady) {
+                if (!cloudReady && !firestoreReady) {
                     const saved = saveLocalFallbackPhotos();
                     if (!saved) return;
                 }
 
                 renderProjectPhotos(projectId);
                 if (uploadedCount > 0) {
-                    if (cloudReady) {
+                    if (cloudReady && firestoreReady) {
+                        showToast('Uploaded to Cloudinary and synced with Firestore for all visitors.', 'success');
+                    } else if (cloudReady) {
                         showToast('Media uploaded to Cloudinary and published for all visitors.', 'success');
                     } else {
-                        showToast('Saved in browser preview. Add Cloudinary keys for public sharing.', 'info');
+                        showToast('Saved in browser preview. Add Cloudinary & Firebase keys for public sync.', 'info');
                     }
                 }
             } finally {
@@ -1905,10 +2050,20 @@
             projectPhotos[projectId] = projectPhotos[projectId].filter(p => p.id !== photoId);
             renderProjectPhotos(projectId);
 
+            if (isFirestoreConfigured()) {
+                try {
+                    await deleteMediaRecordFromFirestore(photoId);
+                    showToast('Deleted permanently for all visitors across devices.', 'success');
+                } catch {
+                    showToast('Failed to delete record from Firestore. Check your Firestore rules/config.');
+                }
+                return;
+            }
+
             if (isCloudConfigured()) {
                 hiddenCloudPhotoIds.add(photoId);
                 saveHiddenCloudPhotoIds();
-                showToast('Hidden in this browser. To delete permanently for all visitors, remove it in your Cloudinary Media Library.', 'info');
+                showToast('Hidden in this browser. Add FIREBASE_CONFIG to delete globally for all visitors.', 'info');
             } else {
                 saveLocalFallbackPhotos();
             }
